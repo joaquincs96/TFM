@@ -1,0 +1,97 @@
+---
+title: "Timepoints Interacting"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# Timepoints Interacting with Aggregates
+
+This analysis includes computing the timepoints a neutrophil interacts with an aggregate by measuring the euclidean distance and considering the volumes as spheres.
+
+```{r}
+# Libraries
+library(dplyr)
+library(readr)
+
+# Load data
+neutrophils <- read_csv("../../merged_dmso_1_final.csv")
+aggregates <- read_csv("../../agregados_dmso1.csv")
+
+# Define helper functions for distance and radius calculations
+distance_euclidean <- function(x1, y1, z1, x2, y2, z2) {
+  sqrt((x2 - x1)^2 + (y2 - y1)^2 + (z2 - z1)^2)
+}
+
+calculate_sphere_radius <- function(volume) {
+  (3 * volume / (4 * pi))^(1/3)
+}
+
+# Main function to calculate interaction timepoints
+calculate_interaction_timepoints <- function(neutrophils, aggregates, threshold_distance = 10) {
+  # Initialize columns
+  neutrophils$TimePoints.Interacting <- 0
+  neutrophils$Track.TimePoints.Interacting <- 0
+  
+  # Process each trackID
+  for(trackID in unique(neutrophils$TrackID)) {
+    track_data <- neutrophils[neutrophils$TrackID == trackID, ]
+    total_interactions <- 0
+    
+    # Check each timepoint
+    for(i in 1:nrow(track_data)) {
+      neutrophil_position <- track_data[i, c("Position.X", "Position.Y", "Position.Z")]
+      neutrophil_volume <- track_data[i, "Volume"]
+      neutrophil_radius <- calculate_sphere_radius(neutrophil_volume)
+      
+      interaction_found <- FALSE
+      
+      # Compare against all aggregates
+      for(j in 1:nrow(aggregates)) {
+        aggregate_position <- aggregates[j, c("Position.X", "Position.Y", "Position.Z")]
+        aggregate_volume <- aggregates[j, "Volume"]
+        aggregate_radius <- calculate_sphere_radius(aggregate_volume)
+        
+        # Calculate adjusted distance
+        distance <- distance_euclidean(neutrophil_position[1], neutrophil_position[2], neutrophil_position[3],
+                                        aggregate_position[1], aggregate_position[2], aggregate_position[3])
+        
+        # Check for interaction
+        if(distance <= (neutrophil_radius + aggregate_radius + threshold_distance)) {
+          interaction_found <- TRUE
+          break # Assume one contact per timepoint for simplicity
+        }
+      }
+      
+      # Update interaction counts
+      if(interaction_found) {
+        total_interactions <- total_interactions + 1
+        neutrophils$TimePoints.Interacting[neutrophils$ID == track_data[i, "ID"]] <- total_interactions
+      }
+    }
+    
+    # Update total interactions for the track
+    neutrophils$Track.TimePoints.Interacting[neutrophils$TrackID == trackID] <- total_interactions
+  }
+  
+  return(neutrophils)
+}
+
+# Example usage
+updated_neutrophils <- calculate_interaction_timepoints(neutrophils, aggregates)
+head(updated_neutrophils[, c("ID", "TrackID", "TimePoint", "TimePoints.Interacting", "Track.TimePoints.Interacting")])
+write.csv(updated_neutrophils, "updated_neutrophils.csv")
+```
+

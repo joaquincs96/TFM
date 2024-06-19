@@ -1,0 +1,80 @@
+---
+title: "Maximum Interaction Time"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# Calculate Maximum Interaction Time with Aggregates
+
+This document explains how to calculate the maximum continuous interaction time a neutrophil has with any aggregate.
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(readr)
+
+neutrofilos_con_numero_agregados = read.csv("neutrophils_aggregates_interaction.csv")
+
+# Asumiendo que cada TimePoint equivale a 131.734 segundos como se mencionó anteriormente
+timepoint_a_segundos <- 131.734
+
+calcular_interacciones_acumulativas_y_maximas <- function(neutrofilos, agregados, umbral_distancia = 10) {
+  # Asumiendo que cada TimePoint equivale a 131.734 segundos como se mencionó anteriormente
+  timepoint_a_segundos <- 131.734
+  
+  # Añadir las nuevas columnas al dataframe neutrofilos inicializadas a 0
+  neutrofilos$Track.Max.TimePoints.Interacting <- 0
+  neutrofilos$Max.TimePoints.Interacting <- 0
+  neutrofilos$Track.Max.Duration.Interacting <- 0
+  neutrofilos$Max.Duration.Interacting <- 0
+  
+  # Iterar sobre cada trackID único en los datos de neutrófilos
+  for(trackID in unique(neutrofilos$TrackID)) {
+    # Filtrar las filas correspondientes a este trackID
+    datos_neutrofilo <- neutrofilos[neutrofilos$TrackID == trackID,]
+    
+    # Variables para rastrear las interacciones máximas continuas a nivel de track
+    max_continuas_track <- 0
+    contador_continuo <- 0  # Contador para las interacciones continuas a nivel de timepoint
+    
+    # Iterar sobre cada fila (timepoint) del trackID
+    for(i in 1:nrow(datos_neutrofilo)) {
+      if(datos_neutrofilo$Neutrophil.Is.Interacting[i] == 1) {
+        contador_continuo <- contador_continuo + 1  # Incrementar si hay interacción
+      } else {
+        contador_continuo <- 0  # Reiniciar si la interacción se detiene
+      }
+      
+      # Actualizar el contador continuo máximo para el track si es necesario
+      max_continuas_track <- max(max_continuas_track, contador_continuo)
+      
+      # Asignar el valor actual del contador continuo a la fila correspondiente
+      neutrofilos$Max.TimePoints.Interacting[neutrofilos$ID == datos_neutrofilo$ID[i]] <- contador_continuo
+      neutrofilos$Max.Duration.Interacting[neutrofilos$ID == datos_neutrofilo$ID[i]] <- contador_continuo * timepoint_a_segundos
+    }
+    
+    # Asignar el máximo de interacciones continuas del track a las columnas correspondientes
+    neutrofilos$Track.Max.TimePoints.Interacting[neutrofilos$TrackID == trackID] <- max_continuas_track
+    neutrofilos$Track.Max.Duration.Interacting[neutrofilos$TrackID == trackID] <- max_continuas_track * timepoint_a_segundos
+  }
+  
+  return(neutrofilos)
+}
+neutrofilos_contiempodeinteraccion <- calcular_interacciones_acumulativas_y_maximas(neutrofilos_con_numero_agregados)
+head(neutrofilos_contiempodeinteraccion[, c("ID", "TrackID", "TimePoint", "Track.Max.TimePoints.Interacting", "Max.TimePoints.Interacting", "Track.Max.Duration.Interacting", "Max.Duration.Interacting")])
+write.csv(neutrofilos_contiempodeinteraccion, "neutrophils_with_interaction_time.csv")
+```
+

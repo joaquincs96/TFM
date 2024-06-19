@@ -1,0 +1,106 @@
+---
+title: "Different Aggregates Interacted"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# Calculate Interactions with Different Aggregates
+
+This document details how to calculate the number of different aggregates each neutrophil interacts with during its track.
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(readr)
+library(sets)
+
+# Define helper functions for distance and radius calculations
+distancia_euclidiana <- function(x1, y1, z1, x2, y2, z2) {
+  sqrt((x2 - x1)^2 + (y2 - y1)^2 + (z2 - z1)^2)
+}
+
+calcular_radio_esfera <- function(volume) {
+  (3 * volume / (4 * pi))^(1/3)
+}
+
+# Define the function
+calculate_interactions_with_aggregates <- function(neutrofilos, agregados, umbral_distancia = 10) {
+  # Añadir nuevas columnas al dataframe neutrofilos
+  neutrofilos$Track.Number.Of.Aggregates.Interacting <- 0
+  neutrofilos$Neutrophil.Is.Interacting <- 0
+  neutrofilos$Number.Of.Aggregates.Interacting <- 0
+  
+  # Iterar sobre cada trackID único en los datos de neutrófilos
+  for(trackID in unique(neutrofilos$TrackID)) {
+    # Filtrar las filas correspondientes a este trackID
+    datos_neutrofilo <- neutrofilos[neutrofilos$TrackID == trackID,]
+    
+    # Crear un conjunto vacío para rastrear los agregados únicos con los que el neutrófilo interactúa
+    agregados_unicos_interactuando <- set()
+    contador_acumulado <- 0  # Contador acumulado de agregados con los que ha interactuado
+    
+    # Iterar sobre cada fila (timepoint) del neutrófilo
+    for(i in 1:nrow(datos_neutrofilo)) {
+      # Obtener la posición y el volumen del neutrófilo en este timepoint
+      neutrofilo <- datos_neutrofilo[i,]
+      
+      # Contador para verificar si el neutrófilo interactúa en este timepoint
+      interactuando_en_este_timepoint <- 0
+      
+      # Iterar sobre todos los agregados
+      for(j in 1:nrow(agregados)) {
+        # Calcular la distancia ajustada por los radios
+        distancia <- distancia_euclidiana(neutrofilo$Position.X, neutrofilo$Position.Y, neutrofilo$Position.Z, 
+                                          agregados[j,]$Position.X, agregados[j,]$Position.Y, agregados[j,]$Position.Z)
+        
+        # Si hay contacto, incrementar el contador acumulado y actualizar la variable de interacción
+        if(distancia <= (calcular_radio_esfera(neutrofilo$Volume) + calcular_radio_esfera(agregados[j,]$Volume) + umbral_distancia)) {
+          # Generar un identificador único para el agregado basado en su posición
+          id_agregado <- paste(agregados[j,]$Position.X, agregados[j,]$Position.Y, agregados[j,]$Position.Z, sep = "_")
+          if(!(id_agregado %in% agregados_unicos_interactuando)) {
+            agregados_unicos_interactuando <- c(agregados_unicos_interactuando, id_agregado)
+            contador_acumulado <- contador_acumulado + 1
+          }
+          interactuando_en_este_timepoint <- 1
+          break # Asumimos un solo contacto por timepoint para simplificar
+        }
+      }
+      
+      # Actualizar las columnas con los datos de interacción del timepoint actual
+      neutrofilos$Neutrophil.Is.Interacting[neutrofilos$ID == neutrofilo$ID] <- interactuando_en_este_timepoint
+      neutrofilos$Number.Of.Aggregates.Interacting[neutrofilos$ID == neutrofilo$ID] <- contador_acumulado
+    }
+    
+    # Actualizar la columna del número total de agregados diferentes con los que contacta el track
+    neutrofilos$Track.Number.Of.Aggregates.Interacting[neutrofilos$TrackID == trackID] <- length(agregados_unicos_interactuando)
+  }
+  
+  # Factorizar la columna Neutrophil.Is.Interacting
+  neutrofilos$Neutrophil.Is.Interacting <- factor(neutrofilos$Neutrophil.Is.Interacting)
+  
+  return(neutrofilos)
+}
+
+# Example usage
+neutrophils <- read_csv("neutrophils_interacting.csv")
+aggregates <- read_csv("../../agregados_dmso1.csv")
+neutrophils <- calculate_interactions_with_aggregates(neutrophils, aggregates)
+head(neutrophils[, c("ID", "TrackID", "TimePoint", "Number.Of.Aggregates.Interacting", "Track.Number.Of.Aggregates.Interacting", "Neutrophil.Is.Interacting")])
+write.csv(neutrophils, "neutrophils_aggregates_interaction.csv")
+```
+
+
+
