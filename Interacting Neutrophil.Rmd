@@ -1,0 +1,43 @@
+---
+title: "Interacting Neutrophil"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+  df_print: paged
+highlight: kate
+number_sections: true
+theme: spacelab
+toc: yes
+toc_float: yes
+---
+  
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# Determine Neutrophil Interaction Status
+
+This document outlines the method for determining whether a neutrophil is interacting with an aggregate throughout its track.
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(readr)
+
+# Define a function to determine the interacting status of neutrophils
+determine_interaction_status <- function(neutrophils) {
+  neutrophils$Interacting.Neutrophil <- as.integer(neutrophils$NewContact > 0)
+  neutrophils$Interacting.Neutrophil <- factor(neutrophils$Interacting.Neutrophil, levels = c(0, 1))
+
+  return(neutrophils)
+}
+
+# Example usage
+neutrophils <- read_csv("neutrophils_with_numbered_contacts.csv")
+neutrophils <- determine_interaction_status(neutrophils)
+head(neutrophils[, c("ID", "TrackID", "TimePoint", "Interacting.Neutrophil")])
+write.csv(neutrophils, "neutrophils_interacting.csv")
+```
+
