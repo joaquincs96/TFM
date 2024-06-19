@@ -1,0 +1,265 @@
+---
+title: "PCA Analysis"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(FactoMineR)
+library(factoextra)
+library(ggplot2)
+library(viridis)
+library(viridisLite)
+library(dplyr)
+library(tidyr)
+```
+
+
+# Principal Component Analysis (PCA)
+This section of the analysis involves conducting a Principal Component Analysis (PCA) on neutrophil track parameters. The goal is to reduce the dimensionality of our data, enabling us to observe patterns and trends that are not readily visible in high-dimensional data. This approach helps us identify the main sources of variation among neutrophils under different experimental conditions, such as their interaction with keratinocytes or other neutrophils, as well as under different treatment conditions. We will visualize these patterns through graphs that highlight the differences and similarities in data distribution, thus facilitating a clearer and more direct interpretation of the complexities inherent in our biological data.
+
+
+## Data loading 
+
+```{r}
+neutrophils = readRDS("neutrofilos_unique.RDS")
+```
+
+## Filter track parameters
+
+```{r}
+# Find parameters related to tracks
+track_parameters <- grep("Track", names(neutrophils), value = TRUE)
+
+to_remove <- c("TrackID", "TrackID_sd", "Track.Position.Z.Start",
+              "Track.Position.Z.Mean",
+                "Track.Position.Y.Start",
+                "Track.Position.Y.Mean",
+                "Track.Position.X.Start",
+                "Track.Position.X.Mean",
+               "TrackImage.CH2",
+               "TrackImage.CH1", "TrackImage", "Track.Center.of.Image.Mass.Z.CH2", "Track.Center.of.Image.Mass.Z.CH1",
+               "Track.Center.of.Image.Mass.Y.CH1", "Track.Center.of.Image.Mass.Y.CH2", "Track.Center.of.Image.Mass.X.CH1",
+               "Track.Center.of.Image.Mass.X.CH2", "Track.Center.of.Homogeneous.Mass.Z", "Track.Center.of.Homogeneous.Mass.Y",
+               "Track.Center.of.Homogeneous.Mass.X")
+
+# Actualizar la lista de parámetros de track eliminando los no deseados
+track_parameters <- setdiff(track_parameters, to_remove)
+
+# Ver la lista actualizada
+head(track_parameters)
+```
+
+## Data scaling
+
+```{r}
+# Plotting original data
+boxplot(neutrophils[, track_parameters])
+
+# Scaling data
+track.scaled <- as.data.frame(scale(neutrophils[, track_parameters]))
+
+# Plotting scaled data
+boxplot(track.scaled[, track_parameters])
+```
+
+### Remove columns with NAs
+
+```{r}
+# Removing columns with NA
+track.scaled <- track.scaled %>%
+  dplyr::select(
+    -Track.Number.of.Branches, 
+    -Track.Number.of.Fusions, 
+    -Track.Number.Of.Generations, 
+    -Time.Since.Track.Start)
+```
+
+## PCA
+
+```{r}
+# Performing PCA on your numerical data
+neutrofilos_pca <- PCA(track.scaled, ncp = 58, graph = TRUE)
+```
+
+### Visualize PCA
+
+```{r}
+# Visualize only the points of PCA
+fviz_pca_ind(neutrofilos_pca, 
+             label = "none",  # Ensure no point labels are shown
+             habillage = neutrophils$Condition,  # Color by migration type
+             addEllipses = TRUE,  # Add confidence ellipses
+             ellipse.level = 0.95)  # Confidence level for ellipses
+  ggtitle("PCA of neutrophils by condition")  # Add plot title
+  theme_minimal()  # Apply a minimalistic theme
+```
+
+## Get the ideal number of components
+
+```{r}
+# Obtain the variance explained by each component
+var_explicada <- neutrofilos_pca$eig[, "percentage of variance"]
+
+# Calculate the cumulative explained variance
+var_acumulada <- cumsum(var_explicada)
+
+# Find the number of components that explain 80% of the variance
+num_componentes_80 <- which.max(var_acumulada >= 80)
+num_componentes_80
+```
+
+```{r}
+# Crear el barplot con colores condicionales
+barplot(var_acumulada, names.arg = paste0("Comp.", 1:length(var_acumulada)),
+        xlab = "Componentes principales", ylab = "Varianza explicada acumulada",
+        col = ifelse(var_acumulada >= 80, "lightgray", "yellow"),
+        main = "Varianza explicada acumulada por componentes principales")
+
+# Añadir línea horizontal roja en el 80% de varianza explicada acumulada
+abline(h = 80, col = "red", lty = 2)
+
+# Añadir línea vertical azul en la componente 31
+abline(v = 17, col = "blue", lwd = 2)  # `lwd` ajusta el grosor de la línea
+```
+
+## Get variable loading matrix
+
+```{r}
+# Get variable loading matrix
+loadings <- get_pca_var(neutrofilos_pca)$coord
+
+
+# Select up to Dimension 5
+loadings_subset <- loadings[, 1:5]
+
+# Sort columns from Dim1 to Dim5
+loadings_subset <- loadings_subset[, order(colnames(loadings_subset))]
+
+# Plot the heatmap
+heatmap(loadings_subset, col = viridis(20))
+```
+
+## Function to obtain the most relevant genes by dimension
+
+```{r}
+# Define a function to obtain the most relevant genes by dimension
+get_top_genes <- function(loadings_matrix, dimension, n = 10) {
+  # Get the loads for the specified dimension
+  loadings_dim <- loadings_matrix[, dimension]
+  
+  # Sort the genes by their loadings in the dimension
+  sorted_genes <- sort(abs(loadings_dim), decreasing = TRUE)
+  
+  # Get the most positive and negative genes
+  top_positive <- names(sorted_genes)[head(which(loadings_dim >= 0), n)]
+  top_negative <- names(sorted_genes)[head(which(loadings_dim < 0), n)]
+  
+  return(list(positive = top_positive, negative = top_negative))
+}
+
+# Get the most relevant genes for each dimension (for example, for the first 5 dimensions)
+top_genes_per_dimension <- lapply(1:5, function(dim) get_top_genes(loadings, dim))
+
+# Show results
+for (dim in 1:5) {
+  cat("Dim.", dim, ":\n")
+  cat("Positive:", paste(top_genes_per_dimension[[dim]]$positive, collapse = ", "), "\n")
+  cat("Negative:", paste(top_genes_per_dimension[[dim]]$negative, collapse = ", "), "\n\n")
+}
+```
+
+# Filter data from PCA
+
+```{r}
+# Coordinates of individuals in the PCA
+coords <- neutrofilos_pca$ind$coord
+
+# Extract points of interest from the 'treated' group
+treated_points <- coords[neutrophils$Condition == "treated", ]
+
+# Find the point with the maximum value on PC1
+max_pc1 <- treated_points[which.max(treated_points[, "Dim.1"]), ]
+
+# Find the sixth minimum value in PC2
+# Sort PC2 in ascending order and select the sixth
+sixth_min_pc2_index <- order(treated_points[, "Dim.2"], decreasing = FALSE)[6]  # Take the sixth smallest index
+sixth_min_pc2 <- treated_points[sixth_min_pc2_index, ]
+
+# Calculate the slope of the line joining these two points
+slope <- (sixth_min_pc2["Dim.2"] - max_pc1["Dim.2"]) / (sixth_min_pc2["Dim.1"] - max_pc1["Dim.1"])
+
+# Define the intersection
+intercept <- max_pc1["Dim.2"] - slope * max_pc1["Dim.1"]
+
+# Extend the line to the plot boundaries
+x_limits <- range(coords[, "Dim.1"])  # Determine the limits of Dim.1
+y_limits <- intercept + slope * x_limits  # Calculate the new limits of y based on the slope
+
+# View only PCA points
+plot <- fviz_pca_ind(neutrofilos_pca, 
+             label = "none",  # Ensures no point labels are displayed
+             habillage = neutrophils$Condition,  # Colored by condition
+             addEllipses = TRUE,  # Add confidence ellipses
+             ellipse.level = 0.95) + # Confidence level for ellipses
+  geom_segment(aes(x = x_limits[1], y = y_limits[1], 
+                   xend = x_limits[2], yend = y_limits[2]),
+               linetype = "dashed", color = "blue", size = 1) +
+  ggtitle("PCA of neutrophils by condition") +  
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),  
+    axis.text.x = element_text(angle = 45, hjust = 1),  
+    axis.title.x = element_text(face = "bold"),  
+    axis.title.y = element_text(face = "bold")  
+  )
+
+# Print the plot
+print(plot)
+```
+
+## Label neutrophils as "Potentially Benefitial" and "Potentially Dangerous"
+
+```{r}
+# Add the data column to the coordinate dataframe
+coords_with_data <- cbind(coords, neutrophils)
+
+# Filter data based on position relative to the diagonal line
+datos_filtrados <- coords_with_data %>%
+  filter(Dim.2 < (slope * Dim.1 + intercept))  # Points below the line
+datos_filtrados$Group <- "Potentially Dangerous"
+
+resto <- coords_with_data %>%
+  filter(Dim.2 >= (slope * Dim.1 + intercept))  # Points above the line
+resto$Group <- "Potentially Beneficial"
+
+# Combine datasets for visualization
+combined_data <- rbind(datos_filtrados, resto)
+
+# View results to ensure correct separation
+ggplot(combined_data, aes(x = Dim.1, y = Dim.2, color = Group)) +
+  geom_point() +
+  geom_segment(aes(x = min(coords[, "Dim.1"]), y = intercept + slope * min(coords[, "Dim.1"]),
+                   xend = max(coords[, "Dim.1"]), yend = intercept + slope * max(coords[, "Dim.1"])),
+               linetype = "dotted", color = "black", size = 1.5) +
+  scale_color_manual(values = c("Potentially Dangerous" = "red", "Potentially Beneficial" = "blue")) +
+  ggtitle("PCA with Diagonal Separation") +
+  theme_minimal() +
+  labs(color = "Grupo")  
+```
+
+
+
