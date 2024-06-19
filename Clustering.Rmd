@@ -1,0 +1,182 @@
+---
+title: "Clustering Analysis"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(pvclust)
+library(dplyr)
+library(ggplot2)
+library(FactoMineR)
+library(factoextra)
+library(tidyr)
+```
+
+```{r}
+datos_filtrados = read.csv("../datos_filtrados.csv")
+
+# Find parameters related to tracks
+track_parameters <- grep("Track", names(datos_filtrados), value = TRUE)
+
+to_remove <- c("TrackID", "TrackID_sd", "Track.Position.Z.Start",
+              "Track.Position.Z.Mean",
+                "Track.Position.Y.Start",
+                "Track.Position.Y.Mean",
+                "Track.Position.X.Start",
+                "Track.Position.X.Mean",
+               "TrackImage.CH2",
+               "TrackImage.CH1", "TrackImage", "Track.Center.of.Image.Mass.Z.CH2", "Track.Center.of.Image.Mass.Z.CH1",
+               "Track.Center.of.Image.Mass.Y.CH1", "Track.Center.of.Image.Mass.Y.CH2", "Track.Center.of.Image.Mass.X.CH1",
+               "Track.Center.of.Image.Mass.X.CH2", "Track.Center.of.Homogeneous.Mass.Z", "Track.Center.of.Homogeneous.Mass.Y",
+               "Track.Center.of.Homogeneous.Mass.X")
+
+# Actualizar la lista de parámetros de track eliminando los no deseados
+track_parameters <- setdiff(track_parameters, to_remove)
+
+# Ver la lista actualizada
+head(track_parameters)
+
+boxplot(datos_filtrados[track_parameters])
+scaled_filtrados = as.data.frame(scale(datos_filtrados[track_parameters]))
+boxplot(scaled_filtrados)
+
+# Delete columns with NA
+scaled_filtrados <- scaled_filtrados %>%
+  dplyr::select(-c(Track.Number.of.Branches, Track.Number.of.Fusions, Track.Number.Of.Generations, Time.Since.Track.Start))
+
+# Check the dimensions of the updated dataframe
+print(dim(scaled_filtrados))
+```
+
+# Clustering
+
+
+## Distance calculation
+
+We begin by calculating the distance matrix on scaled data, which will serve as the basis for our hierarchical clustering.
+
+```{r}
+compared.dist = dist(scaled_filtrados)
+```
+
+We then apply various hierarchical clustering methods to this distance matrix.
+
+```{r}
+complete <- hclust(compared.dist, method = "complete")
+avg <- hclust(compared.dist, method = "average")
+single <- hclust(compared.dist, method = "single")
+centroid <- hclust(compared.dist, method = "centroid")
+ward <- hclust(compared.dist, method = "ward.D")
+```
+
+Next, we compute the cophenetic correlation coefficient for each method to evaluate their performance.
+
+```{r}
+complete <- cor(compared.dist, cophenetic(complete))
+average <- cor(compared.dist, cophenetic(avg))
+single <- cor(compared.dist, cophenetic(single))
+centroid <- cor(compared.dist, cophenetic(centroid))
+ward <- cor(compared.dist, cophenetic(ward))
+
+mejor <- data.frame(complete, single, centroid, average, ward)
+round(mejor, 4)
+```
+
+## Clustering
+
+### Euclidean distance and Average method
+
+```{r, eval=FALSE}
+# Perform clustering analysis with pvclust
+set.seed(123)  
+pv_result_track_average <- pvclust(t(scaled_filtrados), method.dist="euclidean", method.hclust="average", nboot=1000)
+
+saveRDS(pv_result_track_average, "pv_result_ave.RDS")
+```
+
+```{r}
+pv_result_track_average = readRDS("../pv_result_ave.RDS")
+# Visualize the result with p values of AU and BP
+plot(pv_result_track_average)
+```
+
+### Euclidean distance and Complete method
+
+```{r, eval=FALSE}
+# Perform clustering analysis with pvclust
+set.seed(123)  
+pv_result_track_complete <- pvclust(t(scaled_filtrados), method.dist="euclidean", method.hclust="complete", nboot=1000)
+saveRDS(pv_result_track_complete, "pv_result_complete.RDS")
+```
+
+```{r}
+pv_result_track_complete = readRDS("../pv_result_complete.RDS")
+# Visualize the result with p values of AU and BP
+plot(pv_result_track_complete)
+```
+
+### Correlation distance and Average method
+
+```{r, eval=FALSE}
+# Perform clustering analysis with pvclust
+set.seed(123)  # Para reproducibilidad
+pv_result_track_average_cor <- pvclust(t(scaled_filtrados), method.dist="correlation", method.hclust="average", nboot=1000)
+saveRDS(pv_result_track_average_cor, "pv_result_ave_cor.RDS")
+```
+
+```{r}
+pv_result_track_average_cor = readRDS("../pv_result_ave_cor.RDS")
+# Visualize the result with p values of AU and BP
+plot(pv_result_track_average_cor)
+```
+
+
+## Represent PCA colored by cluster
+
+```{r}
+# Extracting the hclust object from pvclust results
+hclust_obj = pv_result_track_average_cor$hclust
+
+# Cutting the dendrogram to create two clusters
+clusters = cutree(hclust_obj, k = 2)  # k is the number of clusters
+# Ensure that the order of rows in original_data matches the one used in pvclust
+scaled_filtrados$Cluster = clusters
+
+# Perform PCA
+filtrados_track_pca <- PCA(scaled_filtrados, ncp = 58, graph = FALSE)
+
+filtrados_pca_data <- data.frame(filtrados_track_pca$ind$coord)
+filtrados_pca_data$Cluster = as.factor(clusters)  # Ensure clusters are factor type for coloring
+
+# Plot PCA with clusters as the coloring variable
+fviz_pca_ind(filtrados_track_pca, 
+             label = "none",  # No labels on points
+             habillage = filtrados_pca_data$Cluster,  # Color by cluster
+             addEllipses = TRUE,  # Add confidence ellipses
+             ellipse.level = 0.95,  # 95% confidence level
+             palette = c("#00AFBB", "#E7B800", "#FC4E07"),  # Colors, adjust as needed
+             geom = "point") +  # Use points for individuals
+  ggtitle("PCA of Filtered Neutrophils by Cluster") +  # Update title to reflect clustering
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),  # Center title
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis text for better readability
+    axis.title.x = element_text(face = "bold"),  # Bold x-axis title
+    axis.title.y = element_text(face = "bold")  # Bold y-axis title
+  )
+```
+
