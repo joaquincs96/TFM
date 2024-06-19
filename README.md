@@ -1,4 +1,4 @@
-# Characterization of behaviors in neutrophils using machine learning techniques
+<h1 align="center"> # Characterization of behaviors in neutrophils using machine learning techniques </h1>
 
 ## Abstract
 
