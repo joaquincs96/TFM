@@ -1,0 +1,219 @@
+---
+title: "Random Forest for Track Parameters"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# Introduction
+
+This report presents a detailed analysis using Machine Learning techniques to study track parameters in neutrophils. The aim is to optimize and predict treatment conditions using the Random Forest algorithm and explore different configurations of this model.
+
+```{r}
+# Load necessary libraries
+library(readr)        # For data loading
+library(ggplot2)      # For data visualization
+library(caret)        # For Machine Learning modeling
+library(cluster)      # For k-means clustering
+library(factoextra)   # For additional clustering visualizations
+library(randomForest) # For Random Forest
+library(fastDummies)  # For dummy calculation
+library(dplyr)
+library(ggbeeswarm)
+library(tidyverse)
+```
+
+```{r}
+# Load the data
+neutrofilos_unique = readRDS("../neutrofilos_unique.RDS")
+
+set.seed(1234)
+# Identify factor columns
+factor_parameters <- names(neutrofilos_unique)[sapply(neutrofilos_unique, is.factor)]
+track_parameters <- grep("Track", names(neutrofilos_unique), value = TRUE)
+
+to_remove <- c("TrackID", "TrackID_sd", "Track.Position.Z.Start",
+               "Track.Position.Z.Mean", "Track.Position.Y.Start", 
+               "Track.Position.Y.Mean", "Track.Position.X.Start", 
+               "Track.Position.X.Mean", "TrackImage.CH2", "TrackImage.CH1", 
+               "TrackImage", "Track.Ar1.Z", "Track.Ar1.Y", "Track.Ar1.X", 
+               "Track.Image", "Track.Ar1.Mean", "pID.x", "Time.Since.Track.Start", 
+               "Track.Number.of.Fusions", "Type.Of.Migration", "Track.Number.Of.Generations", 
+               "Track.Number.of.Branches", "Track.Center.of.Image.Mass.Z.CH2", "Track.Center.of.Image.Mass.Z.CH1",
+               "Track.Center.of.Image.Mass.Y.CH1", "Track.Center.of.Image.Mass.Y.CH2", "Track.Center.of.Image.Mass.X.CH1",
+               "Track.Center.of.Image.Mass.X.CH2", "Track.Center.of.Homogeneous.Mass.Z", "Track.Center.of.Homogeneous.Mass.Y",
+               "Track.Center.of.Homogeneous.Mass.X")
+
+# Combine track parameters with factorial parameters
+track_parameters <- unique(c(track_parameters, factor_parameters))
+# Update the list of track parameters by removing unwanted ones
+track_parameters <- setdiff(track_parameters, to_remove)
+
+
+neutrofilos_unique = neutrofilos_unique[track_parameters]
+```
+
+# Data Preparation and Split
+
+Description of data preparation and its division into training and testing sets.
+
+```{r}
+# Data preparation
+neutrofilos_unique$Condition <- as.factor(neutrofilos_unique$Condition)
+set.seed(123)
+trainIndex <- createDataPartition(neutrofilos_unique$Condition, p = .8, list = FALSE)
+neutrofilosTrain <- neutrofilos_unique[trainIndex, ]
+neutrofilosTest <- neutrofilos_unique[-trainIndex, ]
+```
+
+# Training the Random Forest Model
+
+Description of the Random Forest model training process.
+
+```{bash, eval=FALSE}
+# Training control setup
+fitControl <- trainControl(
+  method = "cv",
+  number = 10,
+  savePredictions = "final"
+)
+
+# Model training
+rf_model <- train(
+  Condition ~ ., data = neutrofilosTrain,
+  method = "rf",
+  trControl = fitControl,
+  ntree = 500
+)
+```
+
+# Script for the server
+
+```{bash, eval=FALSE}
+#!/bin/bash
+
+#SBATCH --job-name=neutrofilos_rf_training    # Nombre del trabajo
+#SBATCH --output=rf_%u.%x.%j.out        # Salida estandar (stdout)
+#SBATCH --error=rf_%u.%x.%j.err         # Salida de error (stderr)
+#SBATCH --cpus-per-task=4       #
+#SBATCH --chdir=/home/alumno04/TFM
+
+module load R                     
+Rscript /home/alumno04/TFM/rf_neutrofilos.R  
+```
+
+# Optimizing Random Forest
+
+```{r}
+rf.cv.neutrofilos = readRDS("../randomforest_neutrofilos.RDS")
+
+# Create a data frame with the updated results
+results <- data.frame(
+  ntrees = c(rep(500, 7), rep(1500, 7), rep(2500, 7)),
+  mtry = rep(2:8, 3),
+  Accuracy = c(
+    0.8842510, 0.8905258, 0.9014633, 0.8998760, 0.9030258, 0.9014881, 0.9045883,  # 500 trees
+    0.8763145, 0.8919395, 0.8982143, 0.8966270, 0.8997520, 0.9013145, 0.8981895,  # 1500 trees
+    0.8732887, 0.8920387, 0.8982887, 0.9061012, 0.9092262, 0.9061012, 0.9107887   # 2500 trees
+  ),
+  Kappa = c(
+    0.6269300, 0.6595833, 0.6978788, 0.6989808, 0.7074392, 0.7063465, 0.7142408,  # 500 trees
+    0.5864067, 0.6560980, 0.6811084, 0.6799673, 0.6938638, 0.6957510, 0.6916841,  # 1500 trees
+    0.5831214, 0.6578878, 0.6872619, 0.7156072, 0.7276882, 0.7165469, 0.7314174   # 2500 trees
+  )
+)
+
+# Plot Accuracy as a function of mtry for each ntrees
+library(ggplot2)
+
+ggplot(results, aes(x = mtry, y = Accuracy, group = ntrees, colour = as.factor(ntrees))) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Accuracy as a Function of mtry and ntrees",
+       x = "Mtry",
+       y = "Accuracy",
+       colour = "Ntrees") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Plot Kappa as a function of mtry for each ntrees
+ggplot(results, aes(x = mtry, y = Kappa, group = ntrees, colour = as.factor(ntrees))) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Kappa as a Function of mtry and ntrees",
+       x = "Mtry",
+       y = "Kappa",
+       colour = "Ntrees") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+# Model Evaluation
+
+## Conversion of Categorical Variables to Dummies
+
+```{r}
+dummys <- neutrofilosTest %>%
+  select_if(is.factor) %>%
+  dummy_columns(remove_selected_columns = TRUE, remove_first_dummy = TRUE)
+
+colnames(dummys) <- gsub("_", "", colnames(dummys))
+
+neutrofilosTest.dummy <- neutrofilosTest %>% 
+  dplyr::select(-is.factor) %>%
+  cbind(dummys)
+if("Condition" %in% names(neutrofilosTest)) {
+    neutrofilosTest.dummy$Condition <- factor(neutrofilosTest$Condition, levels = unique(neutrofilosTest$Condition), labels = unique(neutrofilosTest$Condition))
+}
+# Eliminar la columna 'Conditiontreated' de neutrofilosTest.dummy
+neutrofilosTest.dummy <- neutrofilosTest.dummy[ , !names(neutrofilosTest.dummy) %in% "Conditiontreated"]
+```
+
+### Prediction with the Random Forest Model
+
+```{r}
+predict_rf <- predict(rf.cv.neutrofilos$`1500 trees`$finalModel, newdata = neutrofilosTest.dummy)
+```
+
+```{r}
+matrix_rf = confusionMatrix(predict_rf, neutrofilosTest.dummy$Condition, positive = "treated")
+fourfoldplot(matrix_rf$table, color = c("#CC6666", "#99CC99"), conf.level = 0, margin = 1, main = "Matriz de Confusión")
+```
+
+# Analysis of the Importance of Variables in the Random Forest Model
+
+```{r}
+importance_data <- rf.cv.neutrofilos$`1500 trees`$finalModel$importance %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "Variable") %>%
+  arrange(MeanDecreaseGini) %>%  # Ensure descending order for importance
+  mutate(
+    Variable = factor(Variable, levels = Variable),
+    Color = ifelse(seq_along(Variable) >= 54, "red", "blue")  # Color the top 6 variables in red
+  )
+
+# Create a beeswarm plot to visualize the importance data
+ggplot(importance_data, aes(x = Variable, y = MeanDecreaseGini, color = Color)) +
+  geom_quasirandom(groupOnX = TRUE, size = 4, alpha = 0.6) +
+  coord_flip() +
+  labs(title = "Importance of the variables in the Random Forest Model",
+       subtitle = "Measured by Mean Decrease Gini",
+       y = "Mean Decrease Gini",
+       x = "") +
+  theme_minimal() +
+  scale_color_identity()  # Use the colors specified in the data frame
+
+```
+
