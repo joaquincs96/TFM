@@ -1,0 +1,115 @@
+---
+title: "Multivariate Analysis"
+subtitle: "Master in Bioinformatics, University of Murcia"
+author: "Joaquín Cantón Sandoval (joaquin.canton@um.es)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    highlight: kate
+    number_sections: true
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(stats)
+library(knitr)
+```
+
+
+```{r}
+neutrophils = readRDS("neutrofilos_unique.RDS")
+```
+
+## Filter track parameters
+
+```{r}
+# Find parameters related to tracks
+track_parameters <- grep("Track", names(neutrophils), value = TRUE)
+
+to_remove <- c("TrackID", "TrackID_sd", "Track.Position.Z.Start",
+              "Track.Position.Z.Mean",
+                "Track.Position.Y.Start",
+                "Track.Position.Y.Mean",
+                "Track.Position.X.Start",
+                "Track.Position.X.Mean",
+               "TrackImage.CH2",
+               "TrackImage.CH1", "TrackImage", "Track.Center.of.Image.Mass.Z.CH2", "Track.Center.of.Image.Mass.Z.CH1",
+               "Track.Center.of.Image.Mass.Y.CH1", "Track.Center.of.Image.Mass.Y.CH2", "Track.Center.of.Image.Mass.X.CH1",
+               "Track.Center.of.Image.Mass.X.CH2", "Track.Center.of.Homogeneous.Mass.Z", "Track.Center.of.Homogeneous.Mass.Y",
+               "Track.Center.of.Homogeneous.Mass.X")
+
+# Actualizar la lista de parámetros de track eliminando los no deseados
+track_parameters <- setdiff(track_parameters, to_remove)
+
+# Ver la lista actualizada
+head(track_parameters)
+```
+
+# Multivariate Analysis
+
+After identifying significant effects in univariate tests, it's essential to adjust for related factors through multivariate analysis, especially given the complex interactions in biological and experimental contexts. This approach corrects p-values for multiple comparisons and confounding factors, enhancing the precision and biological relevance of statistical results.
+
+## Analysis Based on Condition Adjusting for Individual Variability
+
+Here, we focus on how treatment conditions affect a specific variable—mean track speed (Track.Speed.Mean)—while adjusting for individual variability represented by the factor pID.x.
+
+```{r}
+modelo <- glm(Track.Speed.Mean ~ Condition + factor(pID.x), 
+              family = gaussian(), data = neutrophils)
+
+# Display model summary to view results
+summary(modelo)
+
+```
+
+The fitted model indicates significant effects of the treated condition on neutrophil track speed. Specifically, the coefficient for Conditiontreated is significantly negative, suggesting that the treated condition reduces the mean track speed, adjusting for individual differences.
+
+## Model Dispersion and Deviance Analysis
+
+```{r}
+# Initialize a dataframe to store significant results
+significant_results <- data.frame(Parameter = character(),
+                                  P_Value = character(),
+                                  Significance = character(),
+                                  stringsAsFactors = FALSE)
+
+# Loop to fit a GLM for each track parameter
+for (param in track_parameters) {
+  model <- glm(formula = as.formula(paste(param, "~ Condition + factor(pID.x)")),
+               family = gaussian(), data = neutrophils)
+  summary_model <- summary(model)
+  interaction_p_value <- coef(summary_model)["Conditiontreated", "Pr(>|t|)"]
+
+  if (!is.na(interaction_p_value) && interaction_p_value < 0.05) {
+    # Determine significance asterisks
+    significance <- if(interaction_p_value < 0.0001) "****"
+                    else if(interaction_p_value < 0.001) "***"
+                    else if(interaction_p_value < 0.01) "**"
+                    else if(interaction_p_value < 0.05) "*"
+                    else ""
+    
+    significant_results <- rbind(significant_results, data.frame(Parameter = param,
+                                                                 P_Value = formatC(interaction_p_value, format = "e", digits = 2),
+                                                                 Significance = significance,
+                                                                 stringsAsFactors = FALSE))
+  }
+}
+# Optionally, sort the dataframe by p-value to see the most significant results at the top
+significant_results <- significant_results[order(significant_results$P_Value), ]
+```
+
+### Data display
+
+```{r}
+# Use kable to display the table more elegantly
+kable(significant_results, format = "html", caption = "GLM Results for Various Parameters Comparing Condition and pID.x")
+
+```
+
